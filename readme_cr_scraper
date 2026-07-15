@@ -1,0 +1,40 @@
+# 3GPP Change Request scraper
+
+Pulls Change Request data from the 3GPP portal and adds the source and date of
+each contribution. Three stages, run in order. Stop after stage 1 if you just
+want the CR table. No login needed.
+
+## Setup
+
+```
+pip install pandas requests beautifulsoup4
+pip install python-docx   # optional, cleaner .docx text
+```
+
+## Stages
+
+**1. Grab the CR table** (cells 1–3) → `3gpp_relcrs.csv`
+Scrapes `ChangeRequests.aspx` page by page. Set `max_pages=1` to test,
+`None` for everything (~137 pages). Pick releases with the `release` field in
+`PARAMS` (`"193"` = Rel-18).
+
+**2. Crawl the FTP tree** (cells 5–6) → `tdoc_meta.csv`
+Reads each meeting's directory listing and `DocList.csv` to get every TDoc's
+upload date and source — a few thousand small requests instead of downloading
+every file. Resumable: just re-run the cell if it stops.
+
+**3. Read source & date from the TDoc files** (cells 7–10) → `*_with_source_date.csv`
+Downloads each CR document and pulls the source/date fields. Deduped, resumable
+(via `tdoc_cache.csv`), concurrent. Pass `tdoc_meta.csv` from stage 2 to fetch
+files directly and go ~2x faster.
+
+`status_code`: 1 = source found, 2 = CR form but no source, 3 = not a CR form,
+4 = no file, 5 = download failed, 0 = no TDoc number.
+`date_is_exact`: 1 = from the document, 0 = upload-date fallback.
+
+## Notes
+
+- Both later stages take a while on the full set but resume where they stopped,
+  so stopping and restarting is fine.
+- Don't crank the worker counts too high or the servers throttle you.
+- Cells 9–10 just filter to Rel-18 and re-run — skip if you don't need that.
