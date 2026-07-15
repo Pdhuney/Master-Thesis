@@ -526,9 +526,16 @@ def main(inputs=None, since=None, until=None):
             cr_src.append("linked")
     df["cr_id"] = cr_id
     df["cr_id_source"] = cr_src
-    log.info("  emails with a Tdoc/CR id: %d / %d (by %s)",
-             int((df['cr_id'] != "").sum()), len(df),
-             pd.Series(cr_src).value_counts().to_dict())
+    # Empty ids -> proper missing value (NA) instead of "" so that emails
+    # without a Tdoc/CR id can be filtered cleanly downstream.
+    df["cr_id"] = df["cr_id"].replace("", pd.NA)
+    df["cr_id_source"] = df["cr_id_source"].replace("", pd.NA)
+    df["has_cr_id"] = df["cr_id"].notna()
+    n_with = int(df["has_cr_id"].sum())
+    log.info("  emails with a Tdoc/CR id: %d / %d (%.1f%%) (by %s)",
+             n_with, len(df), 100.0 * n_with / max(len(df), 1),
+             pd.Series([c for c in cr_src if c]).value_counts().to_dict())
+    log.info("  emails WITHOUT a Tdoc/CR id (discussion-only): %d", len(df) - n_with)
 
     log.info("STEP 8/9  Aggregating thread / org / network / index tables")
 
@@ -640,7 +647,7 @@ def main(inputs=None, since=None, until=None):
     log.info("STEP 9/9  Writing output CSVs")
     email_cols = ["list_name", "thread_id", "pos_in_thread", "thread_size",
                   "is_thread_starter", "subject", "subject_norm", "is_reply",
-                  "cr_id", "cr_id_source",
+                  "cr_id", "cr_id_source", "has_cr_id",
                   "from", "from_domain", "from_org_domain",
                   "reply_to", "reply_to_org_domain",
                   "date", "datetime_utc", "year_month", "hour_utc", "weekday",
@@ -653,7 +660,15 @@ def main(inputs=None, since=None, until=None):
                   "body_len"]
     email_cols = [c for c in email_cols if c not in DROP_FROM_EMAIL_CSV]
 
-    for name, frame in [("emails_processed.csv", df[email_cols]),
+    emails_out = df[email_cols]
+    # Split by presence of a Tdoc/CR id: emails that reference a specific CR
+    # (linkable to the CR dataset) vs. discussion-only emails without any id.
+    emails_with_crid = emails_out[emails_out["has_cr_id"]]
+    emails_without_crid = emails_out[~emails_out["has_cr_id"]]
+
+    for name, frame in [("emails_processed.csv", emails_out),
+                        ("emails_with_crid.csv", emails_with_crid),
+                        ("emails_discussion_only.csv", emails_without_crid),
                         ("threads.csv", threads),
                         ("org_thread_response_times.csv", org_thread),
                         ("reply_pairs.csv", reply_pairs),
